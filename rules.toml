@@ -1,0 +1,29 @@
+# EXAMPLE
+
+[tables.users]
+columns = [
+    # 1. Deterministic Masking (Keeps JOINs and Foreign Keys working)
+    { name = "id", strategy = "hmac" },
+    { name = "company_id", strategy = "hmac" },
+
+    # 2. Random Anonymization (Faker) for PII
+    { name = "name", strategy = "faker_name" },
+    { name = "email", strategy = "faker_email" },
+
+    # 3. Fixed Value (Useful for allowing logins in QA environments)
+    { name = "password_hash", strategy = "fixed", value = "$2a$12$R9eb8igRomIQaZAq" },
+
+    # 4. Suppression
+    { name = "session_token", strategy = "nullify" },
+
+    # 5. Local Differential Privacy (LDP) - Laplace Mechanism for Numerics
+    # Adds statistical noise. Ex: salary of 5000 becomes 5123.4
+    { name = "salary", strategy = "dp_laplace", epsilon = 0.5, sensitivity = 15000.0 }
+]
+
+[tables.orders]
+columns = [
+    { name = "id", strategy = "hmac" },
+    { name = "user_id", strategy = "hmac" }, # Will perfectly match users.id
+    { name = "credit_card", strategy = "fake_credit_card" }
+]
