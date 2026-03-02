@@ -14,3 +14,7 @@ clap = { version = "4.5.60", features = ["derive", "env"] }
 dotenvy = "0.15.7"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.0.3"
+fake = "2.9"
+rand = "0.8"
+cpf_cnpj = "0.3"
+uuid = { version = "1.10", features = ["v4"] }

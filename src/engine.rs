@@ -1,0 +1,258 @@
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use fake::faker::internet::en::{IPv4, SafeEmail};
+use fake::faker::name::en::Name;
+use fake::Fake;
+use cpf_cnpj::{cnpj, cpf};
+use rand::seq::SliceRandom; 
+use rand::Rng;
+use uuid::Uuid;
+use rand::distributions::Alphanumeric;
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub tables: HashMap<String, TableConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TableConfig {
+    pub columns: Vec<ColumnConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ColumnConfig {
+    pub name: String,
+    
+    #[serde(flatten)]
+    pub strategy: StrategyConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "strategy", rename_all = "snake_case")]
+pub enum StrategyConfig {
+    Hmac,
+    DpLaplace { epsilon: f64, sensitivity: f64 },
+    FakerName,
+    FakerEmail,
+    FakeCreditCard,
+    FakerPhoneBr, 
+    FakerIp,
+    RandomUuid,
+    Cpf,        
+    Cnpj,      
+    Nullify,
+    Fixed { 
+        value: String 
+    },
+    RandomChoice { 
+        options: Vec<String> 
+    },
+    RandomString { 
+            length: usize 
+    },
+}
+
+impl Config {
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+}
+
+pub fn apply_strategy(strategy: &StrategyConfig, original_value: Option<&str>, rng: &mut impl Rng) -> Option<String> {
+    match strategy {
+        StrategyConfig::FakerName => Some(Name().fake::<String>()),
+        StrategyConfig::FakerEmail => Some(SafeEmail().fake::<String>()),
+        StrategyConfig::FakerIp => Some(IPv4().fake::<String>()),
+        StrategyConfig::RandomUuid => Some(Uuid::new_v4().to_string()),
+        StrategyConfig::FakeCreditCard => Some(generate_fake_credit_card(rng)),
+        StrategyConfig::FakerPhoneBr => Some(generate_fake_phone_br(rng)),
+        StrategyConfig::Cpf => Some(cpf::generate()),
+        StrategyConfig::Cnpj => Some(cnpj::generate()),
+        StrategyConfig::Fixed { value } => Some(value.clone()),
+        StrategyConfig::Nullify => None, 
+        StrategyConfig::RandomChoice { options } => Some(options.choose(rng).cloned().unwrap_or_default()),
+        StrategyConfig::Hmac => {
+            let val = original_value.unwrap_or("");
+            let hashed = hmac_hash(val); 
+            Some(hashed)
+        },
+        StrategyConfig::DpLaplace { epsilon, sensitivity } => {
+            let val = original_value.unwrap_or("0");
+            let noisy_value = dp_laplace(val.parse::<f64>().unwrap_or(0.0), *epsilon, *sensitivity);
+            Some(noisy_value.to_string())
+        },
+        StrategyConfig::RandomString { length } => {
+            let random_str: String = rng
+                .sample_iter(&Alphanumeric)
+                .take(*length)
+                .map(char::from)
+                .collect();
+            Some(random_str)
+        },
+    }
+}
+
+pub fn generate_fake_credit_card(rng: &mut impl Rng) -> String {
+    format!("{:04}-{:04}-{:04}-{:04}", 
+        rng.gen_range(0..=9999), rng.gen_range(0..=9999), 
+        rng.gen_range(0..=9999), rng.gen_range(0..=9999))
+}
+
+pub fn generate_fake_phone_br(rng: &mut impl Rng) -> String {
+    format!("({:02}) 9{:04}-{:04}", 
+        rng.gen_range(11..=99), 
+        rng.gen_range(0..=9999),
+        rng.gen_range(0..=9999))
+}
+
+pub fn hmac_hash(val: &str) -> String {   
+    format!("hashed_{}", val)   
+}
+
+pub fn dp_laplace(val: f64, _epsilon: f64, _sensitivity: f64) -> f64 {
+    val
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    fn seeded_rng() -> StdRng {
+        StdRng::seed_from_u64(42)
+    }
+
+    #[test]
+    fn test_all_strategies_do_not_panic() {
+        let mut rng = seeded_rng();
+
+        let strategies = vec![
+            StrategyConfig::FakerName,
+            StrategyConfig::FakerEmail,
+            StrategyConfig::FakerIp,
+            StrategyConfig::RandomUuid,
+            StrategyConfig::FakeCreditCard,
+            StrategyConfig::FakerPhoneBr,
+            StrategyConfig::Cpf,
+            StrategyConfig::Cnpj,
+            StrategyConfig::Nullify,
+            StrategyConfig::Fixed { value: "STABLE".into() },
+            StrategyConfig::RandomChoice { options: vec!["A".into(), "B".into()] },
+            StrategyConfig::RandomString { length: 8 },
+            StrategyConfig::Hmac,
+            StrategyConfig::DpLaplace { epsilon: 1.0, sensitivity: 100.0 },
+        ];
+
+        for strategy in strategies {
+            let _ = apply_strategy(&strategy, Some("12345"), &mut rng);
+        }
+    }
+
+    #[test]
+    fn test_nullify_strategy() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::Nullify, Some("123"), &mut rng);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_fixed_strategy() {
+        let mut rng = seeded_rng();
+        let strategy = StrategyConfig::Fixed { value: "CONST".into() };
+        let result = apply_strategy(&strategy, Some("123"), &mut rng);
+        assert_eq!(result.unwrap(), "CONST");
+    }
+
+    #[test]
+    fn test_random_string_length() {
+        let mut rng = seeded_rng();
+        let strategy = StrategyConfig::RandomString { length: 12 };
+        let result = apply_strategy(&strategy, Some("abc"), &mut rng).unwrap();
+        assert_eq!(result.len(), 12);
+    }
+
+    #[test]
+    fn test_random_choice_returns_valid_option() {
+        let mut rng = seeded_rng();
+        let options = vec!["A".into(), "B".into()];
+        let strategy = StrategyConfig::RandomChoice { options: options.clone() };
+
+        let result = apply_strategy(&strategy, Some("abc"), &mut rng).unwrap();
+        assert!(options.contains(&result));
+    }
+
+    #[test]
+    fn test_uuid_strategy_valid_format() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::RandomUuid, Some("abc"), &mut rng).unwrap();
+
+        assert!(uuid::Uuid::parse_str(&result).is_ok());
+    }
+
+    #[test]
+    fn test_cpf_strategy_structure() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::Cpf, Some("abc"), &mut rng).unwrap();
+
+        assert_eq!(result.len(), 11);
+        assert!(result.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_cnpj_strategy_structure() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::Cnpj, Some("abc"), &mut rng).unwrap();
+
+        assert_eq!(result.len(), 14);
+        assert!(result.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_credit_card_structure() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::FakeCreditCard, Some("abc"), &mut rng).unwrap();
+
+        assert_eq!(result.len(), 19);
+        assert_eq!(result.matches('-').count(), 3);
+    }
+
+    #[test]
+    fn test_phone_br_format() {
+        let mut rng = seeded_rng();
+        let result = apply_strategy(&StrategyConfig::FakerPhoneBr, Some("abc"), &mut rng).unwrap();
+
+        assert!(result.starts_with('('));
+    }
+
+    #[test]
+    fn test_hmac_is_deterministic_for_same_input() {
+        let mut rng1 = seeded_rng();
+        let mut rng2 = seeded_rng();
+
+        let strategy = StrategyConfig::Hmac;
+
+        let r1 = apply_strategy(&strategy, Some("123"), &mut rng1);
+        let r2 = apply_strategy(&strategy, Some("123"), &mut rng2);
+
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_dp_laplace_returns_value() {
+        let mut rng = seeded_rng();
+
+        let strategy = StrategyConfig::DpLaplace {
+            epsilon: 1.0,
+            sensitivity: 100.0,
+        };
+
+        let result = apply_strategy(&strategy, Some("5000"), &mut rng);
+
+        assert!(result.is_some());
+        assert!(!result.unwrap().is_empty());
+    }
+}
