@@ -9,22 +9,27 @@ use std::path::PathBuf;
     long_about = "Ferramenta CLI para anonimização e pseudonimização determinística de dumps SQL em alta performance."
 )]
 pub struct Args {
-    // Caminho para o arquivo de configuração (ex: regras.toml)
-    #[arg(short = 'c', long, value_name = "FILE")]
+    #[arg(short = 'c', long, value_name = "FILE", help = "Define o caminho do arquivo de configuração TOML")]
     pub config: PathBuf,
 
-    // Arquivo SQL de entrada. Se omitido, lê da entrada padrão (STDIN / Pipe)
-    #[arg(short = 'i', long, value_name = "INPUT_FILE")]
+    #[arg(short = 'i', long, value_name = "INPUT_FILE", help = "Define o caminho do arquivo de entrada")]
     pub input: Option<PathBuf>,
 
-    // Arquivo SQL de saída. Se omitido, escreve na saída padrão (STDOUT / Pipe)
-    #[arg(short = 'o', long, value_name = "OUTPUT_FILE")]
+    #[arg(short = 'o', long, value_name = "OUTPUT_FILE", help = "Define o caminho do arquivo de saída")]
     pub output: Option<PathBuf>,
 
-    #[arg(short = 's', long, env = "BLINDFOLD_SECRET", hide_env_values = true)]
-    pub secret: String,
+    #[arg(short = 's', long, env = "BLINDFOLD_SECRET", hide_env_values = true, help = "Define uma nova secret_key")]
+    pub secret: String, 
 
-    // modo log
-    // #[arg(short = 'v', long, action = clap::ArgAction::SetTrue)]
-    // pub verbose: bool,
+    #[arg(short = 'v', long, action = clap::ArgAction::SetTrue, help = "Ativa logs detalhados (Debug)")]
+    pub verbose: bool,
+    
+    #[arg(long, help = "Processa o arquivo sem escrever a saída, apenas validando erros e logs")]
+    pub dry_run: bool,
+    
+    #[arg(short = 'l', long, value_name = "ROWS", help = "Limita o processamento a N linhas de INSERT")]
+    pub limit: Option<usize>,
+    
+    #[arg(short = 'p', long, help = "Exibe uma barra de progresso no terminal")]
+    pub progress: bool,
 }
