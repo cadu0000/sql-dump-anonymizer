@@ -10,6 +10,10 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use uuid::Uuid;
 use rand::distributions::Alphanumeric;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -41,7 +45,7 @@ pub enum StrategyConfig {
     FakerIp,
     RandomUuid,
     Cpf,        
-    Cnpj,      
+    Cnpj,       
     Nullify,
     Fixed { 
         value: String 
@@ -62,37 +66,39 @@ impl Config {
     }
 }
 
-pub fn apply_strategy(strategy: &StrategyConfig, original_value: Option<&str>, rng: &mut impl Rng) -> Option<String> {
-    match strategy {
-        StrategyConfig::FakerName => Some(Name().fake::<String>()),
-        StrategyConfig::FakerEmail => Some(SafeEmail().fake::<String>()),
-        StrategyConfig::FakerIp => Some(IPv4().fake::<String>()),
-        StrategyConfig::RandomUuid => Some(Uuid::new_v4().to_string()),
-        StrategyConfig::FakeCreditCard => Some(generate_fake_credit_card(rng)),
-        StrategyConfig::FakerPhoneBr => Some(generate_fake_phone_br(rng)),
-        StrategyConfig::Cpf => Some(cpf::generate()),
-        StrategyConfig::Cnpj => Some(cnpj::generate()),
-        StrategyConfig::Fixed { value } => Some(value.clone()),
-        StrategyConfig::Nullify => None, 
-        StrategyConfig::RandomChoice { options } => Some(options.choose(rng).cloned().unwrap_or_default()),
-        StrategyConfig::Hmac => {
-            let val = original_value.unwrap_or("");
-            let hashed = hmac_hash(val); 
-            Some(hashed)
-        },
-        StrategyConfig::DpLaplace { epsilon, sensitivity } => {
-            let val = original_value.unwrap_or("0");
-            let noisy_value = dp_laplace(val.parse::<f64>().unwrap_or(0.0), *epsilon, *sensitivity);
-            Some(noisy_value.to_string())
-        },
-        StrategyConfig::RandomString { length } => {
-            let random_str: String = rng
-                .sample_iter(&Alphanumeric)
-                .take(*length)
-                .map(char::from)
-                .collect();
-            Some(random_str)
-        },
+impl StrategyConfig {
+    pub fn apply(&self, original_value: Option<&str>, rng: &mut impl Rng, secret: &str) -> Option<String> {
+        match self {
+            StrategyConfig::FakerName => Some(Name().fake::<String>()),
+            StrategyConfig::FakerEmail => Some(SafeEmail().fake::<String>()),
+            StrategyConfig::FakerIp => Some(IPv4().fake::<String>()),
+            StrategyConfig::RandomUuid => Some(Uuid::new_v4().to_string()),
+            StrategyConfig::FakeCreditCard => Some(generate_fake_credit_card(rng)),
+            StrategyConfig::FakerPhoneBr => Some(generate_fake_phone_br(rng)),
+            StrategyConfig::Cpf => Some(cpf::generate()),
+            StrategyConfig::Cnpj => Some(cnpj::generate()),
+            StrategyConfig::Fixed { value } => Some(value.clone()),
+            StrategyConfig::Nullify => None, 
+            StrategyConfig::RandomChoice { options } => Some(options.choose(rng).cloned().unwrap_or_default()),
+            StrategyConfig::Hmac => {
+                let val = original_value.unwrap_or("");
+                let hashed = hmac_hash(val, secret); 
+                Some(hashed)
+            },
+            StrategyConfig::DpLaplace { epsilon, sensitivity } => {
+                let val = original_value.unwrap_or("0");
+                let noisy_value = dp_laplace(val.parse::<f64>().unwrap_or(0.0), *epsilon, *sensitivity);
+                Some(noisy_value.to_string())
+            },
+            StrategyConfig::RandomString { length } => {
+                let random_str: String = rng
+                    .sample_iter(&Alphanumeric)
+                    .take(*length)
+                    .map(char::from)
+                    .collect();
+                Some(random_str)
+            },
+        }
     }
 }
 
@@ -109,8 +115,14 @@ pub fn generate_fake_phone_br(rng: &mut impl Rng) -> String {
         rng.gen_range(0..=9999))
 }
 
-pub fn hmac_hash(val: &str) -> String {   
-    format!("hashed_{}", val)   
+pub fn hmac_hash(val: &str, secret: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC aceita qualquer tamanho");
+        
+    mac.update(val.as_bytes());
+    let result = mac.finalize();
+    
+    hex::encode(result.into_bytes())
 }
 
 pub fn dp_laplace(val: f64, _epsilon: f64, _sensitivity: f64) -> f64 {
@@ -148,14 +160,14 @@ mod tests {
         ];
 
         for strategy in strategies {
-            let _ = apply_strategy(&strategy, Some("12345"), &mut rng);
+            let _ = strategy.apply(Some("12345"), &mut rng, "secret");
         }
     }
 
     #[test]
     fn test_nullify_strategy() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::Nullify, Some("123"), &mut rng);
+        let result = StrategyConfig::Nullify.apply(Some("123"), &mut rng, "secret");
         assert!(result.is_none());
     }
 
@@ -163,7 +175,7 @@ mod tests {
     fn test_fixed_strategy() {
         let mut rng = seeded_rng();
         let strategy = StrategyConfig::Fixed { value: "CONST".into() };
-        let result = apply_strategy(&strategy, Some("123"), &mut rng);
+        let result = strategy.apply(Some("123"), &mut rng, "secret");
         assert_eq!(result.unwrap(), "CONST");
     }
 
@@ -171,7 +183,7 @@ mod tests {
     fn test_random_string_length() {
         let mut rng = seeded_rng();
         let strategy = StrategyConfig::RandomString { length: 12 };
-        let result = apply_strategy(&strategy, Some("abc"), &mut rng).unwrap();
+        let result = strategy.apply(Some("abc"), &mut rng, "secret").unwrap();
         assert_eq!(result.len(), 12);
     }
 
@@ -181,14 +193,14 @@ mod tests {
         let options = vec!["A".into(), "B".into()];
         let strategy = StrategyConfig::RandomChoice { options: options.clone() };
 
-        let result = apply_strategy(&strategy, Some("abc"), &mut rng).unwrap();
+        let result = strategy.apply(Some("abc"), &mut rng, "secret").unwrap();
         assert!(options.contains(&result));
     }
 
     #[test]
     fn test_uuid_strategy_valid_format() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::RandomUuid, Some("abc"), &mut rng).unwrap();
+        let result = StrategyConfig::RandomUuid.apply(Some("abc"), &mut rng, "secret").unwrap();
 
         assert!(uuid::Uuid::parse_str(&result).is_ok());
     }
@@ -196,7 +208,7 @@ mod tests {
     #[test]
     fn test_cpf_strategy_structure() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::Cpf, Some("abc"), &mut rng).unwrap();
+        let result = StrategyConfig::Cpf.apply(Some("abc"), &mut rng, "secret").unwrap();
 
         assert_eq!(result.len(), 11);
         assert!(result.chars().all(|c| c.is_ascii_digit()));
@@ -205,7 +217,7 @@ mod tests {
     #[test]
     fn test_cnpj_strategy_structure() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::Cnpj, Some("abc"), &mut rng).unwrap();
+        let result = StrategyConfig::Cnpj.apply(Some("abc"), &mut rng, "secret").unwrap();
 
         assert_eq!(result.len(), 14);
         assert!(result.chars().all(|c| c.is_ascii_digit()));
@@ -214,7 +226,7 @@ mod tests {
     #[test]
     fn test_credit_card_structure() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::FakeCreditCard, Some("abc"), &mut rng).unwrap();
+        let result = StrategyConfig::FakeCreditCard.apply(Some("abc"), &mut rng, "secret").unwrap();
 
         assert_eq!(result.len(), 19);
         assert_eq!(result.matches('-').count(), 3);
@@ -223,7 +235,7 @@ mod tests {
     #[test]
     fn test_phone_br_format() {
         let mut rng = seeded_rng();
-        let result = apply_strategy(&StrategyConfig::FakerPhoneBr, Some("abc"), &mut rng).unwrap();
+        let result = StrategyConfig::FakerPhoneBr.apply(Some("abc"), &mut rng, "secret").unwrap();
 
         assert!(result.starts_with('('));
     }
@@ -235,8 +247,8 @@ mod tests {
 
         let strategy = StrategyConfig::Hmac;
 
-        let r1 = apply_strategy(&strategy, Some("123"), &mut rng1);
-        let r2 = apply_strategy(&strategy, Some("123"), &mut rng2);
+        let r1 = strategy.apply(Some("123"), &mut rng1, "secret");
+        let r2 = strategy.apply(Some("123"), &mut rng2, "secret");
 
         assert_eq!(r1, r2);
     }
@@ -250,7 +262,7 @@ mod tests {
             sensitivity: 100.0,
         };
 
-        let result = apply_strategy(&strategy, Some("5000"), &mut rng);
+        let result = strategy.apply(Some("5000"), &mut rng, "secret");
 
         assert!(result.is_some());
         assert!(!result.unwrap().is_empty());
