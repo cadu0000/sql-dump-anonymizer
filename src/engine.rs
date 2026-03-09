@@ -33,7 +33,7 @@ pub struct ColumnConfig {
     pub strategy: StrategyConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "strategy", rename_all = "snake_case")]
 pub enum StrategyConfig {
     Hmac,
