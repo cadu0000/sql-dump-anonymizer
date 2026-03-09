@@ -18,16 +18,35 @@ pub enum NormalEvent {
 
 pub struct NormalState {
     pub buf: Vec<u8>,
+    pub inside_comment: bool,
+    pub previous_byte: u8,
 }
 
 impl NormalState {
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(32),
+            inside_comment: false,
+            previous_byte: 0,
         }
     }
 
     pub fn process_byte(&mut self, byte: u8) -> NormalEvent {
+        if self.inside_comment {
+            if byte == b'\n' {
+                self.inside_comment = false;
+                self.buf.clear();
+            }
+            return NormalEvent::Continue;
+        }
+
+        if self.previous_byte == b'-' && byte == b'-' {
+            self.inside_comment = true;
+            self.buf.clear();
+            return NormalEvent::Continue;
+        }
+
+        self.previous_byte = byte;
         self.buf.push(byte);
 
         let buf_len = self.buf.len();
