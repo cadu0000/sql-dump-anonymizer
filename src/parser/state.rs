@@ -14,6 +14,7 @@ pub enum State {
 pub enum NormalEvent {
     Continue,
     StartInsertHeader(Vec<u8>),
+    DefaultStatement(u8),
 }
 
 pub struct NormalState {
@@ -35,14 +36,20 @@ impl NormalState {
         if self.inside_comment {
             if byte == b'\n' {
                 self.inside_comment = false;
-                self.buf.clear();
+                self.previous_byte = byte;
+
+                if self.buf.last() != Some(&b'\n') {
+                    self.buf.push(byte);
+                }
             }
             return NormalEvent::Continue;
         }
 
         if self.previous_byte == b'-' && byte == b'-' {
             self.inside_comment = true;
-            self.buf.clear();
+            self.previous_byte = byte;
+
+            self.buf.pop();
             return NormalEvent::Continue;
         }
 
@@ -54,12 +61,15 @@ impl NormalState {
         let is_insert = buf_len >= 6 && self.buf[buf_len - 6..].eq_ignore_ascii_case(b"INSERT");
         let is_copy = buf_len >= 4 && self.buf[buf_len - 4..].eq_ignore_ascii_case(b"COPY");
 
-        if is_insert {
-            NormalEvent::StartInsertHeader(b"INSERT".to_vec())
-        } else if is_copy {
-            NormalEvent::StartInsertHeader(b"COPY".to_vec())
+        if is_insert || is_copy {
+            let bytes = std::mem::take(&mut self.buf);
+            NormalEvent::StartInsertHeader(bytes)
         } else {
-            NormalEvent::Continue
+            if buf_len > 6 {
+                NormalEvent::DefaultStatement(self.buf.remove(0))
+            } else {
+                NormalEvent::Continue
+            }
         }
     }
 }
@@ -135,7 +145,7 @@ impl InsertHeaderState {
 pub enum ValueEvent {
     Continue,
     TupleComplete(Vec<u8>),
-    ExitValuesMode(Vec<u8>), 
+    ExitValuesMode(Vec<u8>),
 }
 
 pub struct ValueState {
@@ -181,8 +191,8 @@ impl ValueState {
             };
 
             if is_end_marker {
-                let data = std::mem::take(&mut self.tuple_buffer); 
-                return ValueEvent::ExitValuesMode(data); 
+                let data = std::mem::take(&mut self.tuple_buffer);
+                return ValueEvent::ExitValuesMode(data);
             } else {
                 let data = std::mem::take(&mut self.tuple_buffer);
 
@@ -230,9 +240,9 @@ impl ValueState {
                 }
             }
             b';' if !self.inside_string && self.paren_depth == 0 => {
-                self.tuple_buffer.push(byte); 
-                let data = std::mem::take(&mut self.tuple_buffer); 
-                return ValueEvent::ExitValuesMode(data); 
+                self.tuple_buffer.push(byte);
+                let data = std::mem::take(&mut self.tuple_buffer);
+                return ValueEvent::ExitValuesMode(data);
             }
             _ => {
                 if self.paren_depth > 0 {

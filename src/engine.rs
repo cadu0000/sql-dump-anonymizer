@@ -10,9 +10,9 @@ use serde::Deserialize;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::Path;
 use uuid::Uuid;
-use std::io::{Read, Write};
 
 use crate::io::{InputSource, OutputSource};
 use crate::parser::state::{InsertFormat, SqlDialect};
@@ -107,6 +107,11 @@ impl AnonymizerEngine {
                             if !dry_run {
                                 writer.write_all(&footer_bytes)?;
                                 writer.write_all(b"\n\n")?;
+                            }
+                        }
+                        SqlEvent::DefaultStatement(byte) => {
+                            if !dry_run {
+                                writer.write_all(&[byte])?; 
                             }
                         }
                     }
