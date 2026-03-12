@@ -3,14 +3,14 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "blindfold",
+    name = "ghostdump",
     version, 
     about = "High-Throughput SQL Stream Sanitizer", 
     long_about = "Ferramenta CLI para anonimização e pseudonimização determinística de dumps SQL em alta performance."
 )]
 pub struct Args {
     #[arg(short = 'c', long, value_name = "FILE", help = "Define o caminho do arquivo de configuração TOML")]
-    pub config: PathBuf,
+    pub config: Option<PathBuf>,
 
     #[arg(short = 'i', long, value_name = "INPUT_FILE", help = "Define o caminho do arquivo de entrada")]
     pub input: Option<PathBuf>,
@@ -24,7 +24,7 @@ pub struct Args {
     #[arg(short = 'v', long, action = clap::ArgAction::SetTrue, help = "Ativa logs detalhados (Debug)")]
     pub verbose: bool,
     
-    #[arg(long, help = "Processa o arquivo sem escrever a saída, apenas validando erros e logs")]
+    #[arg(short = 'd', long, help = "Processa o arquivo sem escrever a saída, apenas validando erros e logs")]
     pub dry_run: bool,
     
     #[arg(short = 'l', long, value_name = "ROWS", help = "Limita o processamento a N linhas de INSERT")]
