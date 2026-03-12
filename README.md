@@ -1,54 +1,135 @@
-# 🦀 Blindfold: High-Throughput SQL Stream Sanitizer
+
+#  GhostDump: High-Throughput SQL Stream Sanitizer
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-Work_in_Progress-orange.svg)]()
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green.svg)](#licença)
+[![Status](https://img.shields.io/badge/status-Active-success.svg)]()
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green.svg)](#license)
 
-> **Aviso:** Este projeto está atualmente em fase de ideação e desenvolvimento ativo como parte de um Trabalho de Conclusão de Curso (TCC) em Sistemas de Informação. As funcionalidades descritas abaixo representam a arquitetura planejada e o roadmap da ferramenta.
+**GhostDump** anonymizes terabyte-scale SQL dumps in a single streaming pass, preserving relational integrity while protecting sensitive data.
 
-**Blindfold** (`sql-dump-anonymizer`) é uma proposta de ferramenta de linha de comando (CLI) escrita em Rust. Seu objetivo é atuar como um processador de fluxo (*stream processor*) para anonimizar, pseudonimizar e aplicar Privacidade Diferencial em dumps de banco de dados SQL massivos (Terabytes) "em voo", sem a necessidade de conexões ativas com o banco ou alto consumo de memória RAM (*Zero-Memory Overhead*).
-
----
-
-## 💡 O Problema e a Solução
-
-Equipes de engenharia precisam de dados realistas para testar softwares, mas leis de privacidade (como a LGPD) proíbem o uso de dados de produção. Soluções atuais frequentemente falham por exigirem conexão de rede com o banco (inviável em ambientes *air-gapped*) ou por tentarem carregar o banco inteiro na memória, causando gargalos de performance.
-
-O **Blindfold** resolve isso atuando nativamente com *Unix Pipes*. Ele lê o texto do dump SQL linha por linha, identifica dados sensíveis através de uma Máquina de Estados léxica, aplica algoritmos de criptografia e escreve o resultado instantaneamente na saída.
-
-
+It is a high-performance command-line interface (CLI) tool written in Rust. It acts as a stream processor to anonymize, pseudonymize, and apply Differential Privacy to massive SQL database dumps **on the fly**, without requiring active database connections or loading the dataset into memory.
 
 ---
 
-## 🛠️ Como vai funcionar (Arquitetura Planejada)
+##  Features
 
-A ferramenta será guiada por uma **Estratégia Híbrida de Mascaramento**, dividindo o problema em três frentes:
-
-1. **Integridade Estrutural (HMAC-SHA256):** Chaves Primárias (IDs) e Estrangeiras (FKs) sofrerão pseudonimização determinística. O ID `5` sempre virará `892`, preservando os `JOINs` sem a necessidade de manter tabelas "De-Para" na memória.
-2. **Anonimização de PII (Faker):** Nomes, e-mails e CPFs serão substituídos por dados falsos e realistas.
-3. **Privacidade Diferencial Local (LDP):** Para dados numéricos (ex: Salários, Idades), utilizaremos o **Mecanismo de Laplace** para injetar ruído matemático. Isso protege o indivíduo, mas mantém as médias e propriedades estatísticas intactas para as equipes de Ciência de Dados.
+- **High-Throughput Streaming**: Processes massive files using Unix Pipes or direct file I/O.
+- **Finite State Machine (FSM) Parser**: Reads SQL byte-by-byte, accurately identifying structural commands and comments without relying on fragile regular expressions.
+- **Constant Memory Footprint**: Uses a sliding window architecture that keeps memory usage constant regardless of the dump size.
+- **Hybrid Masking Strategy**: Supports deterministic HMAC (to preserve JOINs), Local Differential Privacy (Laplace mechanism for numerics), and Faker generation for PII.
+- **Pass-through Proxy**: Any table or structural command (`CREATE TABLE`, `ALTER`, comments) not explicitly mapped in the rules is written to the output completely untouched.
 
 ---
 
-## ⚙️ Configuração como Código (Configuration as Code)
+##  Architecture & Performance Philosophy
 
-A execução do *Blindfold* dependerá de dois componentes fundamentais de configuração, separando regras de negócio de segredos de infraestrutura:
+GhostDump is designed around a **streaming-first architecture** inspired by the **Pipes and Filters** pattern. In this model, data flows through a sequence of independent processing stages, where each stage performs a specific transformation.
 
-### 1. O Arquivo de Regras (`rules.toml`)
-Este arquivo é o mapa da ferramenta. Ele **deve ser versionado no Git** para garantir que toda a equipe de desenvolvimento tenha a mesma estrutura de testes. Tabelas não declaradas aqui sofrerão *Bypass* (passarão direto para a saída).
+Instead of loading the entire SQL dump into memory, the tool processes the input as a continuous byte stream. 
+
+```text
+Compressed SQL Dump
+       │
+       ▼
+  Stream Reader
+       │
+       ▼
+ FSM SQL Parser
+       │
+       ▼
+Column Tokenizer
+       │
+       ▼
+ Masking Engine (HMAC / Faker / DP)
+       │
+       ▼
+ Streaming Writer
+       │
+       ▼
+Sanitized SQL Dump
+
+```
+
+This approach enables:
+
+* **Single-pass processing**: The SQL dump is parsed only once.
+* **High composability**: Easy integration with other Unix tools (`zcat`, `gzip`).
+* **Lazy masking strategies**: Transformations are applied only to mapped columns.
+
+---
+
+##  Security Model & Deterministic Hashing
+
+GhostDump aims to protect sensitive information while preserving the structural integrity of the dataset for analytics and development.
+
+To maintain relational integrity without maintaining heavy in-memory mapping tables, GhostDump uses **deterministic HMAC-based pseudonymization** for primary and foreign keys. The same input always produces the same pseudonymized identifier, allowing `JOIN` operations to remain valid.
+
+**Example:**
+
+*Original dataset:*
+
+```text
+user_id | order_id
+5       | 12
+5       | 14
+
+```
+
+*After anonymization:*
+
+```text
+user_id | order_id
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | 114bd151f8fb0c58642d2170da4ae7d7c57977260ac2cc8905306cab6b2acabc
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | 114bd151f8fb0c58642d2170da4ae7d7c57977260ac2cc8905306cab6b2acabc
+
+```
+
+---
+
+##  Supported SQL Dialects
+
+GhostDump's FSM parser is designed to handle the most common SQL dump formats:
+
+* **PostgreSQL**: Native support for `COPY ... FROM stdin;` formats (tab-separated values) and traditional `INSERT INTO` statements.
+* **MySQL / SQLite**: Support for multi-value `INSERT INTO ... VALUES (...), (...);` dumps.
+
+---
+
+##  Roadmap & Current Status
+
+GhostDump is currently under active development. The core parsing engine is functional, while some integration features are still in progress.
+
+* [x] **Core Engine**: FSM byte-by-byte SQL parsing and structural bypassing.
+* [x] **Zero-Memory Proxy**: Streaming architecture implementation.
+* [x] **CLI Foundation**: Robust argument parsing using `clap`.
+* [x] **Masking Strategies**: Deterministic HMAC and Faker-based PII anonymization.
+* [ ] **Differential Privacy**: Laplace mechanism implementation.
+* [ ] **Rule Engine Integration**: Connect the `rules.toml` to the FSM.
+* [ ] **UX & Metrics**: Real-time progress metrics (`indicatif`).
+* [ ] **Structured Logging**: Verbose debug mode (`--verbose`).
+* [ ] **Edge Cases**: Advanced handling of `NULL` values.
+* [ ] **Parallel Processing**: Multi-threading for the masking step.
+
+---
+
+##  Configuration as Code
+
+GhostDump relies on two fundamental configuration components, separating **business rules** from **cryptographic secrets**.
+
+### 1. The Rule File (`rules.toml`)
+
+This file maps exactly how each column should be treated. It **should be versioned in Git** to ensure consistency across the engineering team. Tables/columns not declared here will be bypassed.
 
 ```toml
-# rules.toml (Example)
-
 [tables.users]
 columns = [
-    # Deterministic Masking (Keeps JOINs working)
+    # Deterministic Masking (Keeps Foreign Keys working)
     { name = "id", strategy = "hmac" },
     
     # Random Anonymization (PII)
     { name = "name", strategy = "faker_name" },
     
-    # Fixed Value (Allows dev team to login with a known test password)
+    # Fixed Value (Allows the dev team to log in with a known password)
     { name = "password_hash", strategy = "fixed", value = "$2a$12$R9h/cIPz0gi..." },
     
     # Local Differential Privacy (Laplace Mechanism for numerics)
@@ -57,36 +138,87 @@ columns = [
 
 ```
 
-### 2. A Chave Secreta Criptográfica (`.env`)
+### 2. The Cryptographic Secret
 
-A chave usada para gerar os hashes HMAC. Por motivos de segurança, este valor **NUNCA deve ser commitado no repositório** (adicione o `.env` ao `.gitignore`). Ele é lido em tempo de execução via variável de ambiente.
+The secret key used to generate deterministic HMAC hashes. For security reasons, **never commit this to the repository**. It can be provided via CLI argument or environment variable:
 
 ```bash
-# arquivo: .env
-BLINDFOLD_SECRET="chave_super_secreta_de_producao"
+export GHOSTDUMP_SECRET="super_secret_key"
 
 ```
 
 ---
 
-## 🚀 Uso Planejado (Exemplos)
+##  Installation & Usage
 
-A interface de linha de comando será construída usando `clap` e suportará tanto arquivos estáticos quanto *streams* nativos do sistema operacional:
+### Building from Source
 
-**Abordagem 1: Pipeline Unix (Zero uso de disco extra)**
+Clone the repository and build using Cargo:
 
 ```bash
-zcat production_db.sql.gz | blindfold -c rules.toml | gzip > dev_db_anon.sql.gz
+git clone [https://github.com/cadu0000/ghostdump](https://github.com/cadu0000/ghostdump)
+cd ghostdump
+cargo build --release
 
 ```
 
-**Abordagem 2: Processamento de Arquivos**
+The optimized binary will be available at `target/release/ghostdump`.
+
+### Basic Execution
 
 ```bash
-blindfold --config rules.toml --input production_db.sql --output dev_db.sql
+ghostdump -c rules.toml -i production_db.sql -o dev_db.sql -s "super_secret_key"
 
 ```
 
-## 📄 Licença
+### Unix Pipeline (Zero extra disk usage)
 
-Planejado para ser distribuído sob licença dupla **MIT** ou **Apache-2.0**.
+Ideal for processing compressed dumps without extracting them to disk first:
+
+```bash
+export GHOSTDUMP_SECRET="super_secret_key"
+zcat production_db.sql.gz | ghostdump -c rules.toml | gzip > dev_db_anon.sql.gz
+
+```
+
+---
+
+## 🛠️ CLI Arguments
+
+| Flag | Long Argument | Description |
+| --- | --- | --- |
+| `-c` | `--config <FILE>` | Path to the TOML configuration file. |
+| `-i` | `--input <FILE>` | Path to the input SQL dump file. |
+| `-o` | `--output <FILE>` | Path to the output SQL dump file. |
+| `-s` | `--secret <STR>` | Cryptographic secret for HMAC (Can also use `GHOSTDUMP_SECRET` env var). |
+| `-p` | `--progress` | Displays real-time progress metrics (MB/s, ETA). |
+| `-v` | `--verbose` | Enables detailed debug logging for troubleshooting. |
+| `-d` | `--dry-run` | Processes input without writing output (Validation mode). |
+| `-l` | `--limit <ROWS>` | Stop after processing N rows. |
+
+---
+
+##  Testing
+
+To run the entire test suite and validate the parser:
+
+```bash
+cargo test
+
+```
+
+To run tests with standard output visible (useful for debugging state transitions):
+
+```bash
+cargo test -- --nocapture
+
+```
+
+---
+
+##  License
+
+This project is licensed under either of the following licenses, at your option:
+
+* **MIT License** [LICENSE-MIT](https://www.google.com/search?q=LICENSE-MIT) 
+* **Apache License, Version 2.0** [LICENSE-APACHE](https://www.google.com/search?q=LICENSE-APACHE)

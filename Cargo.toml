@@ -1,5 +1,5 @@
 [package]
-name = "sql-dump-anonymizer"
+name = "ghostdump"
 version = "0.1.0"
 edition = "2024"
 authors = ["Carlos Eduardo Pinheiro <ce.pinheiros1@gmail.com>"]

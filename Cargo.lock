@@ -260,6 +260,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostdump"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cpf_cnpj",
+ "dotenvy",
+ "fake",
+ "hex",
+ "hmac",
+ "rand 0.8.5",
+ "regex",
+ "serde",
+ "sha2",
+ "toml",
+ "uuid",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -575,24 +593,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
-]
-
-[[package]]
-name = "sql-dump-anonymizer"
-version = "0.1.0"
-dependencies = [
- "clap",
- "cpf_cnpj",
- "dotenvy",
- "fake",
- "hex",
- "hmac",
- "rand 0.8.5",
- "regex",
- "serde",
- "sha2",
- "toml",
- "uuid",
 ]
 
 [[package]]
